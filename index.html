@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tehran to Berlin Flight Route</title>
+    <script src='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css' rel='stylesheet' />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            overflow: hidden;
+        }
+        
+        #map {
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        
+        .info-panel h2 {
+            margin: 0 0 15px 0;
+            color: #2c3e50;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        
+        .route-info {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px;
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 8px;
+        }
+        
+        .route-info span {
+            font-weight: bold;
+            color: #34495e;
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px 25px;
+            border-radius: 50px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 0 5px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(46, 204, 113, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="info-panel">
+        <h2>✈️ Flight Route</h2>
+        <div class="route-info">
+            <span>From:</span>
+            <span>Tehran (IKIA)</span>
+        </div>
+        <div class="route-info">
+            <span>To:</span>
+            <span>Berlin (BER)</span>
+        </div>
+        <div class="route-info">
+            <span>Distance:</span>
+            <span>~3,200 km</span>
+        </div>
+        <div class="route-info">
+            <span>Duration:</span>
+            <span>~4.5 hours</span>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button class="btn" onclick="animateFlight()">🚀 Start Flight</button>
+        <button class="btn" onclick="resetView()">🔄 Reset</button>
+        <button class="btn" onclick="togglePitch()">🌍 Toggle 3D</button>
+    </div>
+    
+    <div class="status" id="status">Ready for Takeoff</div>
+
+    <script>
+        // Coordinates
+        const tehran = [51.3131, 35.6961]; // Tehran coordinates
+        const berlin = [13.4050, 52.5200]; // Berlin coordinates
+        
+        let map;
+        let animationId;
+        let isAnimating = false;
+        let currentStep = 0;
+        const totalSteps = 200;
+        
+        // Initialize the map
+        function initMap() {
+            map = new maplibregl.Map({
+                container: 'map',
+                style: 'https://demotiles.maplibre.org/style.json', // Free style
+                center: [32.3588, 44.1084], // Midpoint between Tehran and Berlin
+                zoom: 3,
+                pitch: 45,
+                bearing: 0,
+                antialias: true
+            });
+            
+            map.on('load', () => {
+                addRouteLayer();
+                addCityMarkers();
+                setupAnimation();
+            });
+        }
+        
+        // Add route layer
+        function addRouteLayer() {
+            // Great circle route calculation
+            const route = calculateGreatCircleRoute(tehran, berlin, 100);
+            
+            map.addSource('route', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': route
+                    }
+                }
+            });
+            
+            // Add route line
+            map.addLayer({
+                'id': 'route',
+                'type': 'line',
+                'source': 'route',
+                'layout': {
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                },
+                'paint': {
+                    'line-color': '#3498db',
+                    'line-width': 4,
+                    'line-opacity': 0.8
+                }
+            });
+            
+            // Add animated route
+            map.addSource('animated-route', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': []
+                    }
+                }
+            });
+            
+            map.addLayer({
+                'id': 'animated-route',
+                'type': 'line',
+                'source': 'animated-route',
+                'layout': {
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                },
+                'paint': {
+                    'line-color': '#e74c3c',
+                    'line-width': 6,
+                    'line-opacity': 1
+                }
+            });
+            
+            // Add plane marker
+            map.addSource('plane', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'FeatureCollection',
+                    'features': []
+                }
+            });
+            
+            map.addLayer({
+                'id': 'plane',
+                'type': 'symbol',
+                'source': 'plane',
+                'layout': {
+                    'icon-image': 'airport-15',
+                    'icon-size': 2,
+                    'icon-rotate': ['get', 'bearing'],
+                    'icon-rotation-alignment': 'map',
+                    'icon-allow-overlap': true,
+                    'icon-ignore-placement': true
+                },
+                'paint': {
+                    'icon-color': '#e74c3c'
+                }
+            });
+        }
+        
+        // Add city markers
+        function addCityMarkers() {
+            // Tehran marker
+            map.addSource('tehran', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {
+                        'name': 'Tehran'
+                    },
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': tehran
+                    }
+                }
+            });
+            
+            map.addLayer({
+                'id': 'tehran',
+                'type': 'circle',
+                'source': 'tehran',
+                'paint': {
+                    'circle-radius': 8,
+                    'circle-color': '#27ae60',
+                    'circle-stroke-width': 3,
+                    'circle-stroke-color': '#ffffff'
+                }
+            });
+            
+            // Berlin marker
+            map.addSource('berlin', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {
+                        'name': 'Berlin'
+                    },
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': berlin
+                    }
+                }
+            });
+            
+            map.addLayer({
+                'id': 'berlin',
+                'type': 'circle',
+                'source': 'berlin',
+                'paint': {
+                    'circle-radius': 8,
+                    'circle-color': '#e74c3c',
+                    'circle-stroke-width': 3,
+                    'circle-stroke-color': '#ffffff'
+                }
+            });
+            
+            // Add popups
+            map.on('click', 'tehran', () => {
+                new maplibregl.Popup()
+                    .setLngLat(tehran)
+                    .setHTML('<h3>Tehran</h3><p>Departure: Imam Khomeini International Airport</p>')
+                    .addTo(map);
+            });
+            
+            map.on('click', 'berlin', () => {
+                new maplibregl.Popup()
+                    .setLngLat(berlin)
+                    .setHTML('<h3>Berlin</h3><p>Arrival: Berlin Brandenburg Airport</p>')
+                    .addTo(map);
+            });
+        }
+        
+        // Calculate great circle route
+        function calculateGreatCircleRoute(start, end, numPoints) {
+            const route = [];
+            const lat1 = start[1] * Math.PI / 180;
+            const lon1 = start[0] * Math.PI / 180;
+            const lat2 = end[1] * Math.PI / 180;
+            const lon2 = end[0] * Math.PI / 180;
+            
+            for (let i = 0; i <= numPoints; i++) {
+                const f = i / numPoints;
+                const A = Math.sin((1 - f) * Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1))) / Math.sin(Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1)));
+                const B = Math.sin(f * Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1))) / Math.sin(Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1)));
+                
+                const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+                const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+                const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+                
+                const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+                const lon = Math.atan2(y, x);
+                
+                route.push([lon * 180 / Math.PI, lat * 180 / Math.PI]);
+            }
+            
+            return route;
+        }
+        
+        // Setup animation
+        function setupAnimation() {
+            const route = calculateGreatCircleRoute(tehran, berlin, totalSteps);
+            window.flightRoute = route;
+        }
+        
+        // Calculate bearing between two points
+        function calculateBearing(start, end) {
+            const lat1 = start[1] * Math.PI / 180;
+            const lat2 = end[1] * Math.PI / 180;
+            const deltaLon = (end[0] - start[0]) * Math.PI / 180;
+            
+            const x = Math.sin(deltaLon) * Math.cos(lat2);
+            const y = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
+            
+            return (Math.atan2(x, y) * 180 / Math.PI + 360) % 360;
+        }
+        
+        // Animate flight
+        function animateFlight() {
+            if (isAnimating) return;
+            
+            isAnimating = true;
+            currentStep = 0;
+            document.getElementById('status').textContent = 'Flight in Progress';
+            document.getElementById('status').style.background = 'rgba(230, 126, 34, 0.9)';
+            
+            function animate() {
+                if (currentStep >= totalSteps) {
+                    isAnimating = false;
+                    document.getElementById('status').textContent = 'Arrived in Berlin';
+                    document.getElementById('status').style.background = 'rgba(46, 204, 113, 0.9)';
+                    return;
+                }
+                
+                const progress = currentStep / totalSteps;
+                const routeSlice = window.flightRoute.slice(0, currentStep + 1);
+                
+                // Update animated route
+                map.getSource('animated-route').setData({
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': routeSlice
+                    }
+                });
+                
+                // Update plane position
+                if (currentStep > 0) {
+                    const currentPos = window.flightRoute[currentStep];
+                    const prevPos = window.flightRoute[currentStep - 1];
+                    const bearing = calculateBearing(prevPos, currentPos);
+                    
+                    map.getSource('plane').setData({
+                        'type': 'FeatureCollection',
+                        'features': [{
+                            'type': 'Feature',
+                            'properties': {
+                                'bearing': bearing
+                            },
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': currentPos
+                            }
+                        }]
+                    });
+                    
+                    // Update camera to follow plane
+                    if (currentStep % 10 === 0) {
+                        map.easeTo({
+                            center: currentPos,
+                            duration: 500
+                        });
+                    }
+                }
+                
+                currentStep++;
+                animationId = requestAnimationFrame(animate);
+            }
+            
+            animate();
+        }
+        
+        // Reset view
+        function resetView() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            isAnimating = false;
+            currentStep = 0;
+            
+            document.getElementById('status').textContent = 'Ready for Takeoff';
+            document.getElementById('status').style.background = 'rgba(46, 204, 113, 0.9)';
+            
+            map.getSource('animated-route').setData({
+                'type': 'Feature',
+                'properties': {},
+                'geometry': {
+                    'type': 'LineString',
+                    'coordinates': []
+                }
+            });
+            
+            map.getSource('plane').setData({
+                'type': 'FeatureCollection',
+                'features': []
+            });
+            
+            map.easeTo({
+                center: [32.3588, 44.1084],
+                zoom: 3,
+                pitch: 45,
+                bearing: 0,
+                duration: 1000
+            });
+        }
+        
+        // Toggle 3D view
+        function togglePitch() {
+            const currentPitch = map.getPitch();
+            map.easeTo({
+                pitch: currentPitch > 0 ? 0 : 60,
+                duration: 1000
+            });
+        }
+        
+        // Initialize the map when page loads
+        window.addEventListener('load', initMap);
+    </script>
+</body>
+</html>
